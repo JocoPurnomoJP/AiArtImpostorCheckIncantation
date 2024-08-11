@@ -27,7 +27,7 @@ NEWLINE1_POSION_LEN = 1
 CHECK_LENGTH1 = 65
 #10行まで調査対象とする。11行目以降は判定しないし、警告も出す。文字長限界は100　実際は意味ある構成101文字もできたがレアケースなので考慮しない
 MAX_LINE = 10
-MAX_LENGTH = 100
+MAX_LENGTH = 105 #ver2.7から限界突破考慮して105までに
 #Modifyボタン押下時の組み換えの点数方式
 FIRST_NEWLINE_SPACE = 4
 FIRST_NEWLINE_ZENKAKU = 3
@@ -82,6 +82,51 @@ def copy_to_clipboard():
     #改行はこれで排除できるが、\nを実際に打ちたい場合はそれも巻き添えになる
     keepWindowSize()
 
+def changeAuto(event=None):
+    #実際に作業するとしたらon_text_changeと同じ処理になる
+    #あのメソッドはテキスト内容が変わっていないと動作しないので、強制的に動かすようにする
+    on_text_change(chkbox.get())
+    
+#自動補正の状態を見て補正する
+#補正内容はシンプルに、単語の途中の全角文字が見切れ位置となり、その位置の１文字先が見切れ文字ではない場合や区切り文字ではない場合
+#区切り文字の１つ先などに改行位置を挿入したほうが実際のゲームで入力しやすかったので、自動補正機能を作った。
+#半角スペースを見切れ位置のすぐあとに入力して、見切れ位置を自動調整する
+#補正できる場合は補正した値、補正できない場合は引数で受け取った値をそのまま返す
+#posの次の文字が見切れ文字であるかを判定して、文字幅限界の適切な区切り位置を返す
+def getAutoModDelimiterIdx(pos,body):
+    #postの位置が本文より先にある場合は処理をしない
+    body = Zenkaku(body)
+    if lengthDoubleByteStr(body) <= pos + 2:
+        return 0
+    
+    #次の区切り位置までIndexを勧めて、文字幅を確認する
+    workBody = Zenkaku(body[pos:])
+    delimiter = delimiter_dict.get(combobox_delimiter.get(),",")
+    
+    #そもそも残っている文字列に区切り文字がないなら本件の補正はできない
+    delimiterCount = workBody.count(delimiter)
+    if delimiterCount == 0:
+        return 0
+    
+    #チェックは後ろから行う
+    for i in range(len(workBody)-1, -1, -1):
+        #全角文字との兼ね合いでfindが取得するIndexと実際の値がずれる。
+        #なので１文字ずつ読み込んだ文字が区切り文字であるか判断して、文字幅チェックをする
+        if workBody[i] == delimiter:
+            #debug
+            #print(f"in delimiter:{body[pos + i + 1]}")
+            if MAX_LINE_WIDTH > strWidth(body[:pos + i + 2]) and body[pos + i + 1] == delimiter:
+                #debug
+                #print(f"body[:pos + i + 2]:{body[:pos + i + 2]}")
+                return i + 2
+            if MAX_LINE_WIDTH > strWidth(body[:pos + i + 1]):
+                #debug
+                #print(f"body[:pos + i + 1]:{body[:pos + i + 1]}")
+                return i + 1
+            
+    #該当する区切り位置がなかったり、区切り位置がそもそもない場合は補正０で返す
+    return 0
+    
 def on_modify():
     global bk_user_input
     global finalFirstPos
@@ -162,7 +207,7 @@ def on_modify():
     #固定長の文字列が文字幅限界を超えたら、警告
     width = strWidth(fixed_body)
     if isinstance(width,int) == False:
-        label_memo.config(text=f"「{width}」は使用できない文字となります", foreground="red")
+        label_memo.config(text=f"「{width}」は本ツールで使用できない文字となります", foreground="red")
         keepWindowSize()
         return
     if width >= MAX_LINE_WIDTH:
@@ -452,14 +497,15 @@ def strWidth(body):
         #print(f"count:{body.count(char)}")
     return total
 
-def on_text_change(event):
+def on_text_change(event=None):
     global bk_user_input
     global finalFirstPos
     global finalMikire
     global user_inputLength
     user_input = txt.get(1.0, tk.END) #tkinterのTextのgetはIndex指定しないと取れない
-    if user_input == bk_user_input:
-        return
+    if event != True: #Trueが入っている場合は強制的に処理をする
+        if user_input == bk_user_input:
+            return
     finalFirstPos = 0
     finalMikire = 0
     #ボタンやラベル、タグを初期化
@@ -480,7 +526,7 @@ def on_text_change(event):
     label_widthcount2.config(text=f" 2行目文字幅:Error", foreground="black")
     chkChar = strWidth(user_input_no_line)
     if isinstance(chkChar,int) == False:
-        label_memo.config(text=f"「{chkChar}」は使用できない文字となります", foreground="red")
+        label_memo.config(text=f"「{chkChar}」は本ツールで使用できない文字となります", foreground="red")
         keepWindowSize()
         bk_user_input = user_input
         return
@@ -493,7 +539,7 @@ def on_text_change(event):
         bk_user_input = user_input
         return
     if input_length > MAX_LENGTH:
-        label_memo.config(text=f"文字数が{input_length}です。100文字以下にしてください", foreground="red")
+        label_memo.config(text=f"文字数が{input_length}です。{MAX_LENGTH}文字以下にしてください", foreground="red")
         bk_user_input = user_input
         return
     #2023/10/14 text change にmodifyボタンの機能を移動　初期入力の見切れはこちらで判定する
@@ -518,6 +564,24 @@ def on_text_change(event):
     rawFirstLine = rawZenkakuStr[:rawFirstPosition+1]
     firstTp = reAdjustNewLinePosition(rawFirstLine,rawFirstPosition)
     rawFirstPosition = firstTp[0]
+    firstWidth = firstTp[1]
+    
+    #ここで自動補正がONの場合、補正するかどうか検討する
+    if chkbox.get():
+        hoseiPos = getAutoModDelimiterIdx(rawFirstPosition,rawZenkakuStr)
+        if hoseiPos > 0:
+             #改行位置をずらした位置に半角スペースを挿入 挿入した関係で他の文字もずれるので修正する 面倒だがこの処理に入った時点で１つまたは２つずれる。
+             #だがスペースを挿入する位置は元の区切り位置のインデックスから操作するので、１つずれる場合は元のインデックスそのままでカットして、２つずれる場合はそれに＋１される状態にしないといけない
+             rawFirstPosition = rawFirstPosition + hoseiPos
+             user_input = rawZenkakuStr[:rawFirstPosition] + " " + rawZenkakuStr[rawFirstPosition:] + "\n" #後処理の都合でどうしても改行を２回入れる必要がある
+             user_input_no_line = user_input.replace("\n", "")
+             userWidth = strWidth(user_input_no_line)
+             firstWidth = strWidth(rawZenkakuStr[:rawFirstPosition])
+             input_length = lengthDoubleByteStr(user_input_no_line)
+             user_inputLength = input_length
+             txt.delete(1.0, tk.END)
+             txt.insert(1.0, user_input)
+             
     keepWindowSize()
     if rawFirstPosition > 0:
         #最初期の位置が取れたら計算する
@@ -525,7 +589,7 @@ def on_text_change(event):
         #文字列全体で文字幅限界を超えないなら、即時OKで計測不
         secondLength =lengthDoubleByteStr(secondLine)
         rawSecondPosition = secondLength - 1
-        if userWidth - firstTp[1] < MAX_LINE_WIDTH:
+        if userWidth - firstWidth < MAX_LINE_WIDTH:
             #見切れも発生していないので、このままOK
             label_memo.config(text=f"入力したテキストのままで問題ございません", foreground="black")
             checkTextNewline(user_input, input_length, rawFirstPosition, -1)
@@ -552,8 +616,8 @@ def on_text_change(event):
             #checkTextNewline(rawZenkakuStr + '\n', lengthDoubleByteStr(rawZenkakuStr), finalFirstPos, finalMikire)
             checkTextNewline(user_input + '\n', lengthDoubleByteStr(rawZenkakuStr), finalFirstPos, finalMikire)
         button_modify['state'] = tk.NORMAL
-        label_widthcount.config(text=f" 1行目文字幅:{firstTp[1]}", foreground="black")
-        label_widthcount2.config(text=f" 2行目文字幅:{userWidth - firstTp[1]}", foreground="black")
+        label_widthcount.config(text=f" 1行目文字幅:{firstWidth}", foreground="black")
+        label_widthcount2.config(text=f" 2行目文字幅:{userWidth - firstWidth}", foreground="black")
     else:
         label_memo.config(text=f"見切り判定できません。テキストを修正またはModifyを押して調整してください", foreground="red")
     bk_user_input = user_input
@@ -584,33 +648,10 @@ def checkTextNewline(user_input, input_length, firstChk, secondChk):
     #再帰関数で作成しても良いが、そもそも10行も詠唱で使うことがない
     #secondChkに-1が入った場合はModifyからの処理ではないので、改行チェックを行う
     linesCountAry = [0,0,0,0,0,0,0,0,0,0]
-    '''
-    if secondChk == -1:
-        linesCount = -1
-        linesIndexCount = -1
-        indexCount = -1
-        for char in user_input:
-            indexCount += 1
-            linesIndexCount += 1
-            #最後の文字まできたら追加して終わり
-            if len(user_input) == indexCount:
-                linesCount += 1
-                linesCountAry[linesCount] = linesIndexCount + 1
-                break
-            if char == "\n":
-                linesCount += 1
-                if linesCount >= MAX_LINE:
-                    label_memo.config(text=f"行は10行までにしてください", foreground="red")
-                    button_modify['state'] = tk.DISABLED
-                    return
-                linesCountAry[linesCount] = linesIndexCount + 1
-                linesIndexCount = -1 #改行されたので行頭に戻る意味も込めて-1
-    else:
-        linesCountAry[0] = input_length + 1 #Lengthとして渡すので、+1
-    '''
     linesCount = -1
     linesIndexCount = -1
     indexCount = -1
+    
     for char in user_input:
         indexCount += 1
         linesIndexCount += 1
@@ -627,6 +668,7 @@ def checkTextNewline(user_input, input_length, firstChk, secondChk):
                 return
             linesCountAry[linesCount] = linesIndexCount + 1
             linesIndexCount = -1 #改行されたので行頭に戻る意味も込めて-1
+    
     #改行をはずして、全角を2文字としてカウントして、おそらく65文字以上の場合は改行位置確認の処理を入れたほうが良い
     if input_length > CHECK_LENGTH1:
         #ひとまず全角文字、半角文字、そして改行を区別しつつ適切なIndex位置を探すため文字カウントを増やしていく
@@ -663,9 +705,6 @@ def checkTextNewline(user_input, input_length, firstChk, secondChk):
                 txt.tag_config("color1", background="red")
                 break
         if secondChk > 0:
-            #debug
-            #print(f"secondChk:{secondChk}")
-            #print(f"user_input:{user_input}")
             tp = calculateLineCount(linesCountAry,secondChk,len(user_input),len(user_input))
             txt.tag_add("color3", formatTextTagIndex(tp[1],tp[0]), formatTextTagIndex(tp[3],tp[2]))
             txt.tag_config("color3", background="yellow")
@@ -689,8 +728,6 @@ def calculateLineCount(lines, pythonStartIndex, pythonEndIndex, hosei):
     #ここからpythonIndexの値を満たす適切な行数を割り出す
     #適切な行数を割り出せたら行内の何番目になるか計算する
     #なお、StartとEndの行数がまたがる状態の場合も対応できるようにする
-    #debug
-    #print(f"lines:{lines}")
     tempTotalLength = 0
     startLine = 0
     startIndex =  0
@@ -804,7 +841,7 @@ def keepWindowSize():
 
 # Create the main window
 root = tk.Tk()
-root.title("Ai Art Impostor Check Incantation ver 2.6")
+root.title("Ai Art Impostor Check Incantation ver 2.8")
 # incantationは呪文の意味、詠唱を直訳すると賛美歌を示すchantingかオペラ歌手の歌を意味するariaになってしまう
 
 # iconとEXEマークの画像
@@ -832,12 +869,78 @@ frame1.grid(sticky=(tk.N, tk.W, tk.S, tk.E))
 # Frameを作成すると画面そのものに配置ができなくなるみたい
 # Frameの上にボタンなどを配置する形
 
+# Labbel 説明用
+#label_automode = ttk.Label(
+#    frame1, text='自動補正▶')
+#label_automode.grid(row=0, column=0, columnspan=1, sticky=(tk.N, tk.E))
+
+# CheckBox
+#チェックボックス、自動補正のON/OFFのみ
+chkbox = tk.BooleanVar()
+chkbox.set(False)
+checkbox_auto = ttk.Checkbutton(frame1, text='◀改行位置自動補正', variable=chkbox, command=changeAuto)
+checkbox_auto.grid(
+    row=0, column=0, columnspan=2, sticky=(tk.N, tk.W))
+
+# Labbel 説明用
+label_delimiter = ttk.Label(
+    frame1, text='熟語の区切り文字▶')
+label_delimiter.grid(row=0, column=2, columnspan=1, sticky=(tk.N, tk.E))
+
+# ComboBox
+#ドロップダウンリスト、熟語の区切りとして使用する文字
+# 表示タイトル⇛値 に対応する辞書データ
+# data = {"A": 1, "B": 2, "C": 3}
+delimiter_dict = {',(半角カンマ)':',', '、(全角句読点)':'、', '　(全角スペース)':'　'}
+labels = list(delimiter_dict.keys())
+
+combobox_delimiter = ttk.Combobox(frame1, width=16, height=1, state="readonly", values=labels)
+combobox_delimiter.grid(
+    row=0, column=3, columnspan=1, sticky=(tk.N, tk.E))
+combobox_delimiter.set(',(半角カンマ)')
+combobox_delimiter.bind('<<ComboboxSelected>>', selected_delimiter_change)
+
+# Labbel 説明用
+label_modify = ttk.Label(
+    frame1, text='先頭から語順を固定する熟語数▶')
+label_modify.grid(row=0, column=4, columnspan=1, sticky=(tk.N, tk.E))
+
+# ComboBox
+#ドロップダウンリスト、Modifyボタンで先頭からいくつ熟語を固定化するかを指定する
+#一応想定は0-5で
+module_fixed = (0,1,2,3,4,5)
+combobox_modify = ttk.Combobox(frame1, width=2, height=1, state="readonly", values=module_fixed)
+combobox_modify.grid(
+    row=0, column=5, columnspan=1, sticky=(tk.N, tk.E))
+combobox_modify.set(0)
+combobox_modify.bind('<<ComboboxSelected>>', selected_modify_change)
+
+# Button
+#テキストを修正するボタン
+button_modify = ttk.Button(
+    frame1, text='Modify',
+    command=on_modify)
+#commandが直接lammdaと書かれていればCMD側に文字列を直接表記させる
+button_modify.grid(
+    row=0, column=6, columnspan=1, sticky=(tk.N, tk.E))
+
+# Button
+#テキストをクリップボードへ
+#テキストを一括クリア
+button_copy = ttk.Button(
+    frame1, text='Copy',
+    command=copy_to_clipboard)
+#commandが直接lammdaと書かれていればCMD側に文字列を直接表記させる
+button_copy.grid(
+    row=0, column=7, columnspan=1, sticky=(tk.N, tk.E))
+
+
 # Text
 txt = tk.Text(frame1, height=11, width=50, undo=True)
 f1 = Font(family='Helvetica', size=16)
 txt.configure(font=f1)
 txt.insert(1.0, "こちらに詠唱を貼り付ける、または書き込んでください")
-txt.grid(row=1, column=0, columnspan=5, sticky=(tk.N, tk.W, tk.S, tk.E))
+txt.grid(row=1, column=0, columnspan=7, sticky=(tk.N, tk.W, tk.S, tk.E))
 
 # Bind the on_text_change function to the KeyRelease event
 txt.bind('<KeyRelease>', on_text_change)
@@ -849,59 +952,7 @@ scrollbar = ttk.Scrollbar(
     orient=tk.VERTICAL,
     command=txt.yview)
 txt['yscrollcommand'] = scrollbar.set
-scrollbar.grid(row=1, column=5, columnspan=1, sticky=(tk.N, tk.S, tk.W))
-
-# Labbel 説明用
-label_delimiter = ttk.Label(
-    frame1, text='熟語の区切り文字▶')
-label_delimiter.grid(row=0, column=0, columnspan=1, sticky=(tk.N, tk.E))
-
-# ComboBox
-#ドロップダウンリスト、熟語の区切りとして使用する文字
-# 表示タイトル⇛値 に対応する辞書データ
-# data = {"A": 1, "B": 2, "C": 3}
-delimiter_dict = {',(半角カンマ)':',', '、(全角句読点)':'、', '　(全角スペース)':'　'}
-labels = list(delimiter_dict.keys())
-
-combobox_delimiter = ttk.Combobox(frame1, width=16, height=1, state="readonly", values=labels)
-combobox_delimiter.grid(
-    row=0, column=1, columnspan=1, sticky=(tk.N, tk.E))
-combobox_delimiter.set(',(半角カンマ)')
-combobox_delimiter.bind('<<ComboboxSelected>>', selected_delimiter_change)
-
-# Labbel 説明用
-label_modify = ttk.Label(
-    frame1, text='先頭から語順を固定する熟語数▶')
-label_modify.grid(row=0, column=2, columnspan=1, sticky=(tk.N, tk.E))
-
-# ComboBox
-#ドロップダウンリスト、Modifyボタンで先頭からいくつ熟語を固定化するかを指定する
-#一応想定は0-5で
-module_fixed = (0,1,2,3,4,5)
-combobox_modify = ttk.Combobox(frame1, width=2, height=1, state="readonly", values=module_fixed)
-combobox_modify.grid(
-    row=0, column=3, columnspan=1, sticky=(tk.N, tk.E))
-combobox_modify.set(0)
-combobox_modify.bind('<<ComboboxSelected>>', selected_modify_change)
-
-# Button
-#テキストを修正するボタン
-button_modify = ttk.Button(
-    frame1, text='Modify',
-    command=on_modify)
-#commandが直接lammdaと書かれていればCMD側に文字列を直接表記させる
-button_modify.grid(
-    row=0, column=4, columnspan=1, sticky=(tk.N, tk.E))
-
-# Button
-#テキストをクリップボードへ
-#テキストを一括クリア
-button_copy = ttk.Button(
-    frame1, text='Copy',
-    command=copy_to_clipboard)
-#commandが直接lammdaと書かれていればCMD側に文字列を直接表記させる
-button_copy.grid(
-    row=0, column=5, columnspan=1, sticky=(tk.N, tk.E))
+scrollbar.grid(row=1, column=7, columnspan=1, sticky=(tk.N, tk.S, tk.W))
 
 #現在の文字数（全角文字２バイト計算）を表示する
 f2 = Font(family='Helvetica', size=14, weight='bold')
@@ -912,11 +963,11 @@ label_charcount.grid(
 label_widthcount = ttk.Label(
     frame1, text=' 1行目文字幅：0', font=f2)
 label_widthcount.grid(
-    row=2, column=1, columnspan=1, sticky=(tk.N, tk.W))
+    row=2, column=1, columnspan=3, sticky=(tk.N, tk.W))
 label_widthcount2 = ttk.Label(
     frame1, text=' 2行目文字幅：0', font=f2)
 label_widthcount2.grid(
-    row=2, column=2, columnspan=1, sticky=(tk.N, tk.W))
+    row=2, column=4, columnspan=3, sticky=(tk.N, tk.W))
 
 # Button
 #テキストを一括クリア
@@ -926,14 +977,14 @@ button_clear = ttk.Button(
 #commandが直接lammdaと書かれていればCMD側に文字列を直接表記させる
 #なお、誤作動を防ぐため、画面下側にクリアボタンを配置する
 button_clear.grid(
-    row=2, column=4, columnspan=1, sticky=(tk.E))
+    row=2, column=7, columnspan=1, sticky=(tk.E))
 
 #ボタン実行結果を表示させるラベルメモ
 f2 = Font(family='Helvetica', size=14, weight='bold')
 label_memo = ttk.Label(
     frame1, text='ここにシステムメッセージが表示されます', font=f2)
 label_memo.grid(
-    row=3, column=0, columnspan=6, sticky=(tk.N, tk.W))
+    row=3, column=0, columnspan=8, sticky=(tk.N, tk.W))
 #Frame内の位置を指定
 #https://watlab-blog.com/2020/07/18/tkinter-frame-pack-grid/
 # widgetの配置を設定
