@@ -576,7 +576,8 @@ def on_text_change(event=None):
              user_input = rawZenkakuStr[:rawFirstPosition] + " " + rawZenkakuStr[rawFirstPosition:] + "\n" #後処理の都合でどうしても改行を２回入れる必要がある
              user_input_no_line = user_input.replace("\n", "")
              userWidth = strWidth(user_input_no_line)
-             firstWidth = strWidth(rawZenkakuStr[:rawFirstPosition])
+             rawFirstPosition = getLimitWidthPosition(user_input_no_line,MAX_LINE_WIDTH,userWidth)
+             firstWidth = strWidth(rawZenkakuStr[:rawFirstPosition + hoseiPos])
              input_length = lengthDoubleByteStr(user_input_no_line)
              user_inputLength = input_length
              txt.delete(1.0, tk.END)
@@ -841,7 +842,7 @@ def keepWindowSize():
 
 # Create the main window
 root = tk.Tk()
-root.title("Ai Art Impostor Check Incantation ver 2.8")
+root.title("Ai Art Impostor Check Incantation ver 2.9")
 # incantationは呪文の意味、詠唱を直訳すると賛美歌を示すchantingかオペラ歌手の歌を意味するariaになってしまう
 
 # iconとEXEマークの画像
