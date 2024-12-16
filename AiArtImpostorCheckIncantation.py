@@ -117,10 +117,12 @@ def getAutoModDelimiterIdx(pos,body):
             #print(f"in delimiter:{body[pos + i + 1]}")
             if MAX_LINE_WIDTH > strWidth(body[:pos + i + 2]) and body[pos + i + 1] == delimiter:
                 #debug
+                #print(f"strWidth:{strWidth(body[:pos + i + 2])}")
                 #print(f"body[:pos + i + 2]:{body[:pos + i + 2]}")
                 return i + 2
             if MAX_LINE_WIDTH > strWidth(body[:pos + i + 1]):
                 #debug
+                #print(f"strWidth:{strWidth(body[:pos + i + 1])}")
                 #print(f"body[:pos + i + 1]:{body[:pos + i + 1]}")
                 return i + 1
             
@@ -576,10 +578,14 @@ def on_text_change(event=None):
              user_input = rawZenkakuStr[:rawFirstPosition] + " " + rawZenkakuStr[rawFirstPosition:] + "\n" #後処理の都合でどうしても改行を２回入れる必要がある
              user_input_no_line = user_input.replace("\n", "")
              userWidth = strWidth(user_input_no_line)
-             rawFirstPosition = getLimitWidthPosition(user_input_no_line,MAX_LINE_WIDTH,userWidth)
-             firstWidth = strWidth(rawZenkakuStr[:rawFirstPosition + hoseiPos])
              input_length = lengthDoubleByteStr(user_input_no_line)
              user_inputLength = input_length
+             rawFirstPosition = getLimitWidthPosition(user_input_no_line,MAX_LINE_WIDTH,userWidth)
+             rawZenkakuStr = Zenkaku(user_input_no_line)
+             rawFirstLine = rawZenkakuStr[:rawFirstPosition+1]
+             firstTp = reAdjustNewLinePosition(rawFirstLine,rawFirstPosition)
+             rawFirstPosition = firstTp[0]
+             firstWidth = firstTp[1]
              txt.delete(1.0, tk.END)
              txt.insert(1.0, user_input)
              
