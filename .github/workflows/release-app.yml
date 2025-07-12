@@ -30,14 +30,6 @@ jobs:
         id: set_evn
         run: | 
           "DRAFT_TAG_NAME=v$(date +'%Y.%m.%d.%H%M%S')" >> $env:GITHUB_ENV
-      
-      - name: '### 環境変数チェック ###'
-        id: check_env
-        run: | 
-          Write-Output "Write-Output-DRAFT_TAG_NAME: $env:DRAFT_TAG_NAME"
-          echo "env:DRAFT_TAG_NAME: $env:DRAFT_TAG_NAME"
-          echo "env.DRAFT_TAG_NAME: ${{ env.DRAFT_TAG_NAME }}"
-          echo "github.ref_name: ${{ github.ref_name }}"
         
       - name: '### 環境セットアップ ###'
         uses: actions/setup-python@v5
@@ -47,15 +39,20 @@ jobs:
 
       - name: '# pipを最新化'
         run: python.exe -m pip install --upgrade pip
-
-      - name: '# pipでPyInstallerをインストール'
-        run: pip install PyInstaller
-
-      - name: '# pipで依存ライブラリをインストール'
+      
+      - name: '### 環境変数チェック ###'
+        id: check_env
         run: |
+          echo "github.ref_name: ${{ github.ref_name }}"
+          Get-ChildItem env:
+
+      - name: '# pipでPyInstallerと依存ライブラリをインストール'
+        run: |
+            pip install PyInstaller
             pip install mojimoji
             pip install pywinauto
             pip install pyautogui
+            pip list
 
       - name: '### ビルド ###'
         id: build-step
@@ -83,6 +80,7 @@ jobs:
 
       - name: '### リリース ###'
         id: release-step
+        if: ${{ ! github.event_name == 'workflow_dispatch' }}
         uses: softprops/action-gh-release@v2
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
